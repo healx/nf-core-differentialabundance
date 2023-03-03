@@ -1,0 +1,704 @@
+---
+output: slidy_presentation
+date: "`r Sys.Date()`"
+params:
+  meta: NULL
+  input_dir: NULL
+  artifact_dir: NULL
+  cpus: 1 
+  study_type: NULL
+  study_name: NULL
+  study_abundance_type: NULL
+  observations_type: NULL
+  observations: NULL                                          # GSE156533.samplesheet.csv
+  observations_id_col: NULL
+  observations_name_col: NULL
+  features: NULL
+  features_type: NULL
+  features_id_col: NULL
+  features_name_col: NULL
+  features_metadata_cols: NULL 
+  raw_matrix: null                                            # e.g. 0_salmon.merged.gene_counts.tsv
+  normalised_matrix: null
+  variance_stabilised_matrix: null                            # e.g. test_files/3_treatment-WT-P23H.vst.tsv
+  contrasts_file: null                                        # e.g. GSE156533.contrasts.csv
+  differential_table: file.csv
+  affy_cel_files_archive: NULL
+  affy_file_name_col: NULL
+  affy_background: NULL
+  affy_bgversion: NULL
+  affy_destructive: NULL
+  affy_cdfname: NULL
+  affy_rm_mask: NULL
+  affy_rm_outliers: NULL
+  affy_rm_extra: NULL
+  affy_build_annotation: NULL
+  limma_ndups: NULL
+  limma_spacing: NULL
+  limma_block: NULL
+  limma_correlation: NULL
+  limma_method: NULL
+  limma_proportion: NULL
+  limma_stdev_coef_lim: NULL
+  limma_trend: NULL
+  limma_robust: NULL
+  limma_winsor_tail_p: NULL
+  limma_adjust_method: NULL
+  limma_p_value: NULL
+  limma_lfc: NULL
+  limma_confint: NULL
+  exploratory_n_features: null
+  exploratory_clustering_method: null
+  exploratory_cor_method: null
+  exploratory_whisker_distance: null
+  exploratory_mad_threshold: null
+  exploratory_main_variable: null
+  exploratory_assay_names: NULL
+  exploratory_final_assay: NULL
+  exploratory_palette_name: NULL
+  versions_file: null                                         # e.g 17_software_versions.yml
+  logo: null
+  css: null
+  citations: null
+  filtering_min_samples: 1
+  filtering_min_abundance: 1
+  filtering_min_proportion: NULL
+  filtering_grouping_var: NULL
+  differential_file_suffix: NULL
+  differential_feature_id_column: NULL
+  differential_feature_name_column: NULL
+  differential_fc_column: NULL
+  differential_pval_column: NULL
+  differential_qval_column: NULL
+  differential_min_fold_change: NULL
+  differential_foldchanges_logged: NULL
+  differential_max_pval: NULL
+  differential_max_qval: NULL
+  differential_palette_name: NULL
+  deseq2_test: NULL
+  deseq2_fit_type: NULL
+  deseq2_sf_type: NULL
+  deseq2_min_replicates_for_replace: NULL
+  deseq2_use_t: NULL
+  deseq2_lfc_threshold: NULL
+  deseq2_alt_hypothesis: NULL
+  deseq2_independent_filtering: NULL
+  deseq2_p_adjust_method: NULL
+  deseq2_alpha: NULL
+  deseq2_minmu: NULL
+  deseq2_vs_method: NULL
+  deseq2_shrink_lfc: NULL
+  deseq2_cores: NULL
+  deseq2_vs_blind: NULL
+  deseq2_vst_nsub: NULL
+  gsea_run: false
+  gsea_nperm: NULL
+  gsea_permute: NULL
+  gsea_scoring_scheme: NULL    
+  gsea_metric: NULL 
+  gsea_sort: NULL
+  gsea_order: NULL
+  gsea_set_max: NULL
+  gsea_set_min: NULL
+  gsea_norm: NULL
+  gsea_rnd_type: NULL
+  gsea_make_sets: NULL
+  gsea_median: NULL
+  gsea_num: NULL
+  gsea_plot_top_x: NULL
+  gsea_rnd_seed: NULL
+  gsea_save_rnd_lists: NULL
+  gsea_zip_report: NULL
+  gsea_chip_file: NULL 
+  gsea_gene_sets: NULL
+  
+---
+
+<!-- Load libraries -->
+
+```{r, include=FALSE}
+library(knitr)
+library(yaml)
+library(shinyngs)
+library(plotly)
+library(DT)
+library(htmltools)
+```
+
+```{r include = FALSE}
+# Load the datatables js
+datatable(NULL)
+```
+
+```{r, echo=FALSE}
+
+# this function will be available via shinyngs in a release soon but we can use it here for now
+anova_pca_metadata <- function(pca_coords, pcameta, fraction_explained){
+  # Use 10 components or however many fewer is produced by the PCA
+  
+  last_pc <- 10
+  if (ncol(pca_coords) < last_pc) {
+    last_pc <- ncol(pca_coords)
+  }
+  
+  # Remove non-useful variables (those with 1 value, or N values where N is the
+  # number of samples)
+  
+  pcameta <- pcameta[, chooseGroupingVariables(pcameta), drop = FALSE]
+  
+  # Run anova for all PCA against the selected meta vars
+
+  run_anova <- function(meta_col, pc){
+    fit <- aov(pca_coords[, pc] ~ factor(pcameta[, meta_col]))
+    smry <- summary(fit)[[1]]
+
+    if ("Pr(>F)" %in% names(smry)) {
+      smry[["Pr(>F)"]][[1]]
+    }else{
+      NA
+    }
+  }
+  
+  pvals <- outer(
+    1:ncol(pcameta), 
+    1:last_pc,
+    Vectorize(run_anova)  
+  )
+  
+  # Name dimensions
+  
+  dimnames(pvals) <- list(
+    colnames(pcameta),
+    paste(
+      paste("PC", 1:last_pc, sep = ""),
+      " (",
+      fraction_explained[1:last_pc],
+      "%)",
+      sep = ""
+    )
+  )
+  
+  pvals
+}
+
+diffexp_slicer <- function(
+    diffexp_table, 
+    n_genes = NULL, 
+    n_genes_end = 'ignore',
+    min_fold_change = 1, 
+    fold_change_direction = 'both',
+    max_p_value = 1, 
+    max_q_value = 1,
+    fc_column = 'log2FoldChange',
+    pval_column = 'pvalue',
+    qval_column = 'padj',
+    ...
+){
+  
+  diffexp <- diffexp_table
+  select <- rep(TRUE, nrow(diffexp))
+  
+  # Filter initially to a fixed set of genes from the fold change ranking if
+  # specified
+  
+  if (! is.null(n_genes)){
+    up <- rank(-diffexp[[fc_column]]) <= n_genes & diffexp[[fc_column]] > 0
+    down <- rank(diffexp[[fc_column]]) <= n_genes & diffexp[[fc_column]] < 0
+    changed <- rank(-abs(diffexp[[fc_column]])) <= n_genes
+    
+    if (n_genes_end == 'positive'){
+      select <- up
+    }else if (n_genes_end == 'negative'){
+      select <- down
+    }else if (n_genes_end == 'both'){
+      select <- up | down
+    }else if (n_genes_end == 'ignore'){
+      select <- changed 
+    }
+  }
+  
+  # Apply fold change threshold if specified
+  
+  if (min_fold_change > 1){
+    if (fold_change_direction == 'up'){
+      select <- select & diffexp[[fc_column]] > log2(min_fold_change)
+    }else if (fold_change_direction == 'down'){
+      select <- select & diffexp[[fc_column]] < -log2(min_fold_change)
+    }else if (fold_change_direction == 'either'){
+      select <- select & abs(diffexp[[fc_column]]) > log2(min_fold_change)
+    }
+  }
+
+  # Apply p value thresholds
+  
+  select <- select & 
+    diffexp[[pval_column]] <= max_p_value & 
+    diffexp[[qval_column]] <= max_q_value
+  
+  # Use combined selector
+  
+  diffexp_table[select, , drop = FALSE]
+}
+```
+
+
+```{r, include=FALSE}
+versions <- unlist(yaml.load_file(file.path(params$input_dir, params$versions_file)), recursive = FALSE)
+params_table <- data.frame(Parameter = names(unlist(params)), Value = unlist(params), row.names = NULL)
+
+# We'll subset the params table for different report sections
+make_params_table <- function(name, pattern = NULL, remove_pattern = FALSE){
+  subparams <- params_table
+  if (! is.null(pattern)){
+    subparams <- subparams[grep(pattern, subparams$Parameter),]
+  }
+  if (remove_pattern){
+    subparams$Parameter <- sub(pattern, '', subparams$Parameter)
+  }
+  
+  if (nrow(subparams) > 10){
+    dom <- 'tp'
+  }else{
+    dom <- 't'
+  }
+  
+  print( htmltools::tagList(datatable(subparams, caption = paste("Parameters used for", name), rownames = FALSE, options = list(dom = dom)) ))
+}
+
+```
+
+---
+title:  "<img src=\"`r file.path(params$input_dir, params$logo)`\" style=\"float: center; height:150px; padding-top: 0\"/><br />Differential `r params$features_type` abundance report: `r params$study_name`"
+subtitle: differentialabundance workflow version `r versions[["Workflow.nf-core/differentialabundance"]]`
+---
+
+<!-- set notebook defaults -->
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+<!-- Include the CSS and set the logo -->
+
+```{r, echo=FALSE}
+htmltools::includeCSS(params$css)
+```
+
+```{r results="asis", echo=FALSE}
+cat(paste0("
+<style>
+#TOC {
+   background-image: url(\"", knitr::image_uri(params$logo), "\");
+}
+</style>
+"))
+```
+
+<!-- Load input data -->
+
+```{r, echo=FALSE}
+observations <- read_metadata(file.path(params$input_dir, params$observations), id_col = params$observations_id_col)
+if (! params$observations_name_col %in% colnames(observations)){
+    stop(paste('Invalid observation name column specified: ', params$observations_name_col, paste0('(Valid values are: ', paste(colnames(observations), collapse=', '),')')))
+}
+
+if (! is.null(params$features)){
+  features <- read_metadata(file.path(params$input_dir, params$features))
+  features <- features[,colnames(features) %in% simpleSplit(params$features_metadata_cols), drop = FALSE]
+}
+
+contrasts <- read_metadata(file.path(params$input_dir, params$contrasts_file))
+contrasts$blocking <- na.replace(contrasts$blocking, '')
+if (! 'id' %in% colnames(contrasts)){
+  contrasts$id <- apply(contrasts, 1, paste, collapse='_')
+}
+
+# Identify informative variables- those with a number of values greater than 1
+# but less than N, with N being the number of observations. Make sure contrast
+# variables are first in the list
+
+informative_variables <- unique(c(contrasts$variable, chooseGroupingVariables(observations)))
+
+# Remove any informative variables that group observations the same way
+informative_variables <- informative_variables[ ! duplicated(lapply(structure(informative_variables, names= informative_variables), function(x) as.numeric(factor(observations[[x]], levels=unique(observations[[x]])))))]
+
+assay_names <- simpleSplit(params$exploratory_assay_names)
+names(assay_names) = assay_names
+assay_files <- lapply(assay_names, function(x) params[[paste0(x, '_matrix')]])
+
+assay_data <- lapply(assay_files, function(x) {
+  mat <- read_matrix(
+    x,
+    sample_metadata = observations,
+    row.names = 1
+  )
+  colnames(mat) <- observations[[params$observations_name_col]][match(colnames(mat), rownames(observations))]
+
+  # Bit hacky, but ensure log
+  if (max(mat) > 20){
+    log2(mat+1)
+  }else{
+    mat 
+  }
+})
+
+# Now we can rename the observations rows using the title field
+rownames(observations) <- observations[[params$observations_name_col]]
+
+# Run PCA early so we can understand how important each variable is
+
+pca_datas <- lapply(names(assay_data), function(assay_type){
+  compilePCAData(assay_data[[assay_type]])
+})
+names(pca_datas) <- names(assay_data)
+
+pca_vs_meta <- anova_pca_metadata(pca_datas[[params$exploratory_final_assay]]$coords, observations[,informative_variables, drop = FALSE], pca_datas[[params$exploratory_final_assay]]$percentVar)
+
+# Do PCAs using only the samples in each contrast
+contrast_pcas <- lapply(1:nrow(contrasts), function(i){
+  contrast_variable <- contrasts$variable[i]
+  contrast_samples <- observations[observations[[contrast_variable]] %in% contrasts[i, c('reference', 'target')], params$observations_name_col]
+  pca_data <- compilePCAData(assay_data[[params$exploratory_final_assay]][,contrast_samples])
+  pca_data$observations <- observations[match(contrast_samples, observations[[params$observations_name_col]]),]
+  pca_data
+})
+
+# Show the variable with the tightest PC associations first
+informative_variables <- rownames(pca_vs_meta)[order(pca_vs_meta[,1])]
+
+# Pick the variable used for coloring purposes etc
+if (params$exploratory_main_variable == 'contrasts'){
+  main_grouping_variable <- contrasts$variable[1]
+}else if (params$exploratory_main_variable == 'auto_pca'){
+  main_grouping_variable <- informative_variables[1]
+}else{
+  if (! params$exploratory_main_variable %in% colnames(observations)){
+    stop(paste('Invalid main variable specified: ', params$exploratory_main_variable))
+  }
+  main_grouping_variable <- params$exploratory_main_variable
+}
+
+# Make sure the main variable is shown first, with remaining shown in order of
+# informativeness
+
+informative_variables <- unique(c(main_grouping_variable, informative_variables))
+
+groupColorScale <- makeColorScale(length(unique(observations[[main_grouping_variable]])), palette = params$exploratory_palette_name)
+```
+
+<!-- Read the differential results.
+NOTE: differential results files are expected to have the pattern:
+
+<variable>-<reference>-<target>-<blocking><differential_file_suffix>, e.g.
+treatment-mCherry-hND6-batcheffect.deseq2.results.tsv
+
+... where variable, reference, target and blocking come from the contrasts file
+(with blocking being optional) and the suffix is defined in parameters.
+-->
+
+```{r, echo=FALSE}
+
+prefix_part_names <- c('variable', 'reference', 'target', 'blocking')
+diff_prefixes <- sub('-$', '', apply(contrasts[,prefix_part_names], 1, function(x) paste(x, collapse = '-')))
+
+differential_files <- lapply(diff_prefixes, function(d){
+ file.path(params$input_dir, paste0(gsub(' |;', '_', d), params$differential_file_suffix)) 
+})
+
+differential_results <- lapply(differential_files, function(diff_file){
+  if (! file.exists(diff_file)){
+    stop(paste("Differential file", diff_file, "does not exist"))
+  }
+  diff <- read_differential(
+    diff_file, 
+    feature_id_column = params$differential_feature_id_column,
+    fc_column = params$differential_fc_column,
+    pval_column = params$differential_pval_column,
+    qval_column = params$differential_qval_column
+  )
+  
+  # If fold changes are not logged already, log them (we assume they're logged
+  # later on)
+  
+  if (! params$differential_foldchanges_logged){
+    diff[[params$differential_fc_column]] <- log2(diff[[params$differential_fc_column]])
+  }
+  
+  # Annotate differential tables if possible
+  
+  if (! is.null(params$features)){
+    diff <- merge(features, diff, by.x = params$features_id_col, by.y = params$differential_feature_id_column)
+  }
+  diff
+})
+names(differential_results) <- diff_prefixes
+```
+
+<!-- Calculate some summary statistics -->
+
+```{r, echo=FALSE}
+
+contrast_descriptions <- paste(contrasts$target, 'versus', contrasts$reference, 'in', contrasts$variable) 
+with_blocking <- which(contrasts$blocking != '')
+contrast_descriptions[with_blocking] <- paste0(contrast_descriptions[with_blocking], " (blocking on ", contrasts$blocking[with_blocking],")")
+
+threshold_sets <- plyr::rbind.fill(
+  data.frame(
+    name = 'basic',
+    max_q_value = params$differential_max_qval,
+    min_fold_change = 1.5
+    #min_fold_change = params$differential_min_fold_change
+  ),
+  data.frame(
+    name = 'slice 1',
+    n_genes = 500,
+    n_genes_end = 'ignore',
+    max_q_value = 0.1
+  ),
+  data.frame(
+    name = 'slice 2',
+    n_genes = 500,
+    n_genes_end = 'ignore',
+    max_q_value = 1
+  ),
+  data.frame(
+    name = 'slice 3',
+    n_genes = 250,
+    n_genes_end = 'both',
+    max_q_value = 0.1
+  ),
+  data.frame(
+    name = 'slice 4',
+    n_genes = 250,
+    n_genes_end = 'both',
+    max_q_value = 1
+  )
+)
+
+differential_tables <- lapply(
+  1:nrow(contrasts),
+  function(x) {
+    dt <- threshold_sets
+    dt$count <-
+      unlist(lapply(lapply(seq(nrow(threshold_sets)), function(y){
+        func_args <- c(
+          list(diffexp = differential_results[[x]]), as.list(threshold_sets[y,])
+        )
+        func_args[is.na(func_args)] <- NULL
+        do.call(diffexp_slicer, func_args)}), nrow))
+    colnames(dt) <- prettifyVariablename(colnames(dt))
+    dt
+  }
+)
+names(differential_tables) <- contrast_descriptions
+```
+
+<!-- Write the report -->
+
+## Contrasts
+
+Comparisons were made between `r params$observations_type` groups defined using using `r params$observation_type` metadata columns, as described in the following table of contrasts:
+
+```{r, echo=FALSE, results='asis'}
+contrasts_to_print <- contrasts
+colnames(contrasts_to_print) <- prettifyVariablename(colnames(contrasts_to_print))
+print( htmltools::tagList(datatable(contrasts_to_print, caption = paste0("Table of contrasts"), rownames = FALSE, options = list(dom = 't')) ))
+```
+
+## Whole dataset pca
+
+```{r, echo=FALSE, results='asis'}
+plot_pca <- function(pca_data, colorby, legend_title = ''){
+  plotdata <- pca_data$coords
+  plotdata$colorby <- colorby
+    
+  # Make plotting data combining PCA coords with coloring groups etc
+
+  plotdata$name <- rownames(plotdata)
+  percentVar <- pca_data$percentVar
+  labels <- paste0(colnames(plotdata), " (", sprintf("%.1f", percentVar), "%)")
+  ncats <- length(unique(plotdata$colorby))
+  
+  plot_args <- list(
+    x = pca_data$coords[, 1],
+    y = pca_data$coords[, 2],
+    xlab = labels[1],
+    ylab = labels[2],
+    colorby = plotdata$colorby,
+    plot_type = 'scatter',
+    palette = groupColorScale,
+    legend_title = prettifyVariablename(legend_title),
+    labels = plotdata$name,
+    show_labels = TRUE
+  )
+  do.call("plotly_scatterplot", plot_args)
+}
+
+pca_data <- pca_datas[[params$exploratory_final_assay]]
+colorby <- factor(
+  observations[,contrasts$variable[1]], 
+  levels = unique(observations[,contrasts$variable[1]])
+)
+plot_pca(pca_data, colorby, contrasts$variable[1])
+```
+
+
+```{r, echo=FALSE, results='asis'}
+
+reference_gsea_tables <- paste0(contrasts$id, '.gsea_report_for_', contrasts$reference, '.tsv')
+target_gsea_tables <- paste0(contrasts$id, '.gsea_report_for_', contrasts$target, '.tsv')
+
+datatable_formatter <- function(df, caption = NULL, cols = NULL, sortby = NULL, nrows = NULL, dom = 't', pageLength=100){
+  
+  if (! is.null(sortby)){
+    df <- df[order(df[[sortby]]),]
+  }
+  if (! is.null(cols)){
+    df <- df[,cols]
+  }
+  if (! is.null(nrows)){
+    df <- head(df, n = nrows)
+  }
+  
+  datatable(
+        df,
+        caption = caption,
+        rownames = FALSE,
+        options = list(
+          autoWidth = TRUE,
+          dom = dom,
+          pageLength = pageLength#,
+          # headerCallback = DT::JS(
+          #   "function(thead) {",
+          #   "  $(thead).css('font-size', '80%');",
+          #   "}"
+          # ),
+          # initComplete = JS(
+          #         "function(){$(this).addClass('compact');}")
+              
+        )
+      )
+}
+
+for (i in 1:nrow(contrasts)) {
+  cat(paste0("\n## ", contrast_descriptions[i], "\n"))
+  
+  contrast_variable <- contrasts[i, 'variable']
+  
+  # Contrast PCA
+  
+  pca_data <- contrast_pcas[[i]]
+  colorby <- factor(
+    pca_data$observations[,contrast_variable], 
+    levels = unique(pca_data$observations[,contrast_variable])
+  )
+  
+  pca_html <- plot_pca(pca_data, colorby, contrast_variable)
+  
+  # Contrast slice differential gene count
+  
+  slices_html <- datatable_formatter(differential_tables[[i]])
+  
+  # GSEA results tables
+  
+  gsea_target <- datatable_formatter(read_metadata(target_gsea_tables[i])[,c(-2,-3)], caption = paste0("\nTarget (", contrasts$target[i], ")\n"), sortby = 'FDR q-val', cols = c('NAME', 'SIZE', 'FDR q-val'), dom = 'tp', pageLength = 5)
+  gsea_reference <- datatable_formatter(read_metadata(reference_gsea_tables[i])[,c(-2,-3)], caption = paste0("\nReference (", contrasts$reference[i], ")\n"), sortby = 'FDR q-val', cols = c('NAME', 'SIZE', 'FDR q-val'), dom = 'tp', pageLength = 5)  
+    
+  # Decisions
+  
+  #####
+  # Spoof some biomarker gene sets- they'd need to come as inputs obviously
+  #####
+  
+  dr <- differential_results[[i]]
+  dr <- dr[order(dr$log2FoldChange),]
+  
+  diagnostic_features <- list(
+    'KO' = head(dr$gene_name),
+    'unwanted' = dr$gene_name[10000:10100],
+    'biomarker' = tail(dr$gene_name, n=100)
+  )
+  
+  ###
+  ###
+  
+  decisions <- list(
+    data.frame(
+      Heuristic = 'd/e genes between 20 and 10k',
+      value = differential_tables[[i]]$Count[differential_tables[[i]]$Name == 'basic'] > 20 & differential_tables[[i]]$Count[differential_tables[[i]]$Name == 'basic'] < 10000
+    )
+  )
+  
+  dr <- differential_results[[i]]
+  de_gene_names <- dr$gene_name[2 ^ abs(dr$log2FoldChange) > params$differential_min_fold_change & dr$padj < params$differential_max_qval ]
+  
+  if ('KO' %in% names(diagnostic_features)){
+    decisions <- c(
+      decisions,
+      list(
+        data.frame(
+          Heuristic = 'All KO genes with FC < -2',
+          value = all(dr[match(diagnostic_features[['KO']], dr$gene_name),'log2FoldChange'] < -1)
+        )
+      )
+    )
+  }
+  
+  if ('unwanted' %in% names(diagnostic_features)){
+    decisions <- c(
+      decisions,
+      list(
+        data.frame(
+          Heuristic = 'No unwanted genes in d/e list',
+          value = ! any(diagnostic_features[['unwanted']] %in% de_gene_names)
+        )
+      )
+    )
+  }
+  if ('biomarker' %in% names(diagnostic_features)){
+    decisions <- c(
+      decisions,
+      list(
+        data.frame(
+          Heuristic = '> 20% of biomarkers differential',
+          value = length(which(diagnostic_features[['biomarker']] %in% de_gene_names)) > (length(diagnostic_features[['biomarker']]) / 5)
+        )
+      )
+    )
+  }
+  
+  decisions_html <- datatable_formatter(do.call(rbind, decisions)) %>% formatStyle(
+    'value',
+    color = 'white',
+    backgroundColor = styleEqual(c(FALSE, TRUE), c('red', 'green'))
+  )
+  
+  # Lay out the slide
+  
+  print(
+    tagList(
+      div(
+        h3('Contrast PCA'),
+        pca_html,
+        class = 'diffab_layout',
+        id = 'contrast_pca'
+      ),
+      div(
+        h3('Gene set analysis'),
+        gsea_target,
+        gsea_reference,
+        h3('DGEM slices'),
+        slices_html,
+        class = 'diffab_layout'
+      ),
+      div(
+        h3('Decisions'),
+        decisions_html,
+        class = 'diffab_layout'
+      )
+    )
+  )
+
+  cat("\n")
+}
+```
