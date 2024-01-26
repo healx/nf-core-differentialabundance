@@ -1,0 +1,94 @@
+body {
+  font-family: Calibri, helvetica, sans-serif;
+}
+
+h1 {
+  color: rgb(36, 176, 100);
+  font-size: 200%;
+}
+
+h2 {
+  color: rgb(36, 176, 100);
+  font-size: 150%;
+}
+
+h3 {
+  font-size: 100%;
+  font-weight: bold;
+}
+
+h3.subtitle {
+  font-size: 120%;
+  color: rgb(0, 0, 0);
+  font-weight: bold;
+}
+
+h4 {
+  font-size: 100%;
+  font-weight: bold;
+  font-style: italic;
+}
+
+.watermark {
+  opacity: 0.1;
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  font-size: 500%;
+  color: #24b064;
+}
+
+.list-group-item.active {
+  z-index: 2;
+  color: #fff;
+  background-color: #24b064;
+  border-color: #24b064;
+}
+.list-group-item.active:hover {
+  z-index: 2;
+  color: #fff;
+  background-color: #24b064;
+  border-color: #24b064;
+}
+
+#TOC {
+  background-size: contain;
+  padding-top: 60px !important;
+  background-repeat: no-repeat;
+}
+
+.nav-pills > li.active > a,
+.nav-pills > li.active > a:hover,
+.nav-pills > li.active > a:focus {
+  color: #fff;
+  background-color: #24b064;
+}
+
+a {
+  color: #24b064;
+  text-decoration: none;
+}
+
+.diffab_layout {
+  float: left;
+  width: 30%;
+}
+.diffab_layout table {
+    width:90%
+}
+.diffab_layout .dataTable td,
+.diffab_layout .dataTable th,
+.diffab_layout .dataTables_paginate {
+  font-size: 8pt;
+  padding: 2px 5px;
+  line-height:100%;
+}
+.diffab_layout .dataTables_paginate {
+  line-height: 50%;
+}    
+#contrast_pca {
+    width: 40%;
+}
+div.slide h1 {
+    margin-bottom: 0;
+}
