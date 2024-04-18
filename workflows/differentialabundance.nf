@@ -1,13 +1,8 @@
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    VALIDATE INPUTS
+    IMPORT MODULES / SUBWORKFLOWS / FUNCTIONS
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
-
-def summary_params = NfcoreSchema.paramsSummaryMap(workflow, params)
-
-// Validate input parameters
-WorkflowDifferentialabundance.initialise(params, log)
 
 def checkPathParamList = [ params.input ]
 for (param in checkPathParamList) { if (param) { file(param, checkIfExists: true) } }
@@ -22,17 +17,35 @@ if (params.study_type == 'affy_array'){
     } else {
         error("CEL files archive not specified!")
     }
-  // If this is another array platform and user wish to read from SOFT files
-  // then a GSE study identifier must be provided
+} else if (params.study_type == 'maxquant') {
+
+        // Should the user have enabled --gsea_run, throw an error
+        if (params.gsea_run) {
+            error("Cannot run GSEA for maxquant data; please set --gsea_run to false.")
+        }
+        if (params.gprofiler2_run){
+            error("gprofiler2 pathway analysis is not yet possible with maxquant input data; please set --gprofiler2_run false and rerun pipeline!")
+        }
+        if (!params.matrix) {
+            error("Input matrix not specified!")
+        }
+        matrix_file = file(params.matrix, checkIfExists: true)
+
+        // Make channel for proteus
+        proteus_in = Channel.of([ file(params.input), matrix_file ])
 } else if (params.study_type == 'geo_soft_file'){
+
+    // To pull SOFT files from a GEO a GSE study identifer must be provided
+
     if (params.querygse && params.features_metadata_cols) {
-        ch_querygse = Channel.of([exp_meta])
+        ch_querygse = Channel.of([exp_meta, params.querygse])
     } else {
         error("Query GSE not specified or features metadata columns not specified")
     }
 } else {
-    // If this is not microarray data, and this an RNA-seq dataset,
+    // If this is not microarray data or maxquant output, and this an RNA-seq dataset,
     // then assume we're reading from a matrix
+
     if (params.study_type == "rnaseq" && params.matrix) {
         matrix_file = file(params.matrix, checkIfExists: true)
         ch_in_raw = Channel.of([ exp_meta, matrix_file])
@@ -43,13 +56,26 @@ if (params.study_type == 'affy_array'){
 }
 
 // Check optional parameters
+if (params.transcript_length_matrix) { ch_transcript_lengths = Channel.of([ exp_meta, file(params.transcript_length_matrix, checkIfExists: true)]).first() } else { ch_transcript_lengths = [[],[]] }
 if (params.control_features) { ch_control_features = Channel.of([ exp_meta, file(params.control_features, checkIfExists: true)]).first() } else { ch_control_features = [[],[]] }
-if (params.gsea_run) {
-    if (params.gsea_gene_sets){
-        gene_sets_files = params.gsea_gene_sets.split(",")
+
+def run_gene_set_analysis = params.gsea_run || params.gprofiler2_run
+
+if (run_gene_set_analysis) {
+    if (params.gene_sets_files) {
+        gene_sets_files = params.gene_sets_files.split(",")
         ch_gene_sets = Channel.of(gene_sets_files).map { file(it, checkIfExists: true) }
-    } else {
+        if (params.gprofiler2_run && (!params.gprofiler2_token && !params.gprofiler2_organism) && gene_sets_files.size() > 1) {
+            error("gprofiler2 can currently only work with a single gene set file")
+        }
+    } else if (params.gsea_run) {
         error("GSEA activated but gene set file not specified!")
+    } else if (params.gprofiler2_run) {
+        if (!params.gprofiler2_token && !params.gprofiler2_organism) {
+            error("To run gprofiler2, please provide a run token, GMT file or organism!")
+        }
+    } else {
+        ch_gene_sets = []    // For methods that can run without gene sets
     }
 }
 
@@ -72,8 +98,7 @@ citations_file = file(params.citations_file, checkIfExists: true)
 */
 
 include { TABULAR_TO_GSEA_CHIP } from '../modules/local/tabular_to_gsea_chip'
-include { READ_FROM_SOFT } from '../modules/local/read_from_soft'
-
+include { FILTER_DIFFTABLE } from '../modules/local/filter_difftable'
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -86,21 +111,26 @@ include { READ_FROM_SOFT } from '../modules/local/read_from_soft'
 //
 include { GUNZIP as GUNZIP_GTF                              } from '../modules/nf-core/gunzip/main'
 include { UNTAR                                             } from '../modules/nf-core/untar/main.nf'
-include { CUSTOM_DUMPSOFTWAREVERSIONS                       } from '../modules/nf-core/custom/dumpsoftwareversions/main'
 include { SHINYNGS_APP                                      } from '../modules/nf-core/shinyngs/app/main'
 include { SHINYNGS_STATICEXPLORATORY as PLOT_EXPLORATORY    } from '../modules/nf-core/shinyngs/staticexploratory/main'
 include { SHINYNGS_STATICDIFFERENTIAL as PLOT_DIFFERENTIAL  } from '../modules/nf-core/shinyngs/staticdifferential/main'
 include { SHINYNGS_VALIDATEFOMCOMPONENTS as VALIDATOR       } from '../modules/nf-core/shinyngs/validatefomcomponents/main'
+include { DESEQ2_DIFFERENTIAL as DESEQ2_NORM                } from '../modules/nf-core/deseq2/differential/main'
 include { DESEQ2_DIFFERENTIAL                               } from '../modules/nf-core/deseq2/differential/main'
 include { LIMMA_DIFFERENTIAL                                } from '../modules/nf-core/limma/differential/main'
 include { CUSTOM_MATRIXFILTER                               } from '../modules/nf-core/custom/matrixfilter/main'
 include { ATLASGENEANNOTATIONMANIPULATION_GTF2FEATUREANNOTATION as GTF_TO_TABLE } from '../modules/nf-core/atlasgeneannotationmanipulation/gtf2featureannotation/main'
 include { GSEA_GSEA                                         } from '../modules/nf-core/gsea/gsea/main'
+include { GPROFILER2_GOST                                   } from '../modules/nf-core/gprofiler2/gost/main'
 include { CUSTOM_TABULARTOGSEAGCT                           } from '../modules/nf-core/custom/tabulartogseagct/main'
 include { CUSTOM_TABULARTOGSEACLS                           } from '../modules/nf-core/custom/tabulartogseacls/main'
 include { RMARKDOWNNOTEBOOK                                 } from '../modules/nf-core/rmarkdownnotebook/main'
 include { AFFY_JUSTRMA as AFFY_JUSTRMA_RAW                  } from '../modules/nf-core/affy/justrma/main'
 include { AFFY_JUSTRMA as AFFY_JUSTRMA_NORM                 } from '../modules/nf-core/affy/justrma/main'
+include { PROTEUS_READPROTEINGROUPS as PROTEUS              } from '../modules/nf-core/proteus/readproteingroups/main'
+include { GEOQUERY_GETGEO                                   } from '../modules/nf-core/geoquery/getgeo/main'
+include { ZIP as MAKE_REPORT_BUNDLE                         } from '../modules/nf-core/zip/main'
+include { softwareVersionsToYAML                            } from '../subworkflows/nf-core/utils_nfcore_pipeline'
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -108,13 +138,12 @@ include { AFFY_JUSTRMA as AFFY_JUSTRMA_NORM                 } from '../modules/n
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
 
-// Info required for completion email and summary
-def multiqc_report = []
-
 workflow DIFFERENTIALABUNDANCE {
 
     // Set up some basic variables
     ch_versions = Channel.empty()
+    // Channel for the contrasts file
+    ch_contrasts_file = Channel.from([[exp_meta, file(params.contrasts)]])
 
     // If we have affy array data in the form of CEL files we'll be deriving
     // matrix and annotation from them
@@ -150,21 +179,41 @@ workflow DIFFERENTIALABUNDANCE {
         ch_versions = ch_versions
             .mix(AFFY_JUSTRMA_RAW.out.versions)
 
+    } else if (params.study_type == 'maxquant'){
+
+        // We'll be running Proteus once per unique contrast variable to generate plots
+        // TODO: there should probably be a separate plotting module in proteus to simplify this
+
+        ch_contrast_variables = ch_contrasts_file
+            .splitCsv ( header:true, sep:(params.contrasts.endsWith('tsv') ? '\t' : ','))
+            .map{ it.tail().first() }
+            .map{
+                tuple('id': it.variable)
+            }
+            .unique()   // uniquify to keep each contrast variable only once (in case it exists in multiple lines for blocking etc.)
+
+        // Run proteus to import protein abundances
+        PROTEUS(
+            ch_contrast_variables.combine(proteus_in)
+        )
+
+        // Re-map the proteus output tables to the study ID as the tables are the same across contrasts, only one norm table will be necessary
+        ch_in_raw = PROTEUS.out.raw_tab
+            .first()
+            .map{ meta, matrix -> tuple(exp_meta, matrix) }
+        ch_in_norm = PROTEUS.out.norm_tab
+            .first()
+            .map{ meta, matrix -> tuple(exp_meta, matrix) }
+
+        ch_versions = ch_versions.mix(PROTEUS.out.versions)
+    } else if(params.study_type == 'geo_soft_file'){
+
+        GEOQUERY_GETGEO(ch_querygse)
+        ch_in_norm = GEOQUERY_GETGEO.out.expression
+        ch_soft_features = GEOQUERY_GETGEO.out.annotation
+
         ch_versions = ch_versions
-            .mix(AFFY_JUSTRMA_NORM.out.versions)
-
-    }
-    else if(params.study_type == 'geo_soft_file'){
-
-        ch_soft_file_input = ch_input
-            .join(ch_querygse)
-
-        READ_FROM_SOFT(ch_soft_file_input)
-        ch_in_raw = READ_FROM_SOFT.out.expression
-        ch_soft_features = READ_FROM_SOFT.out.annotation
-
-        ch_versions = ch_versions
-            .mix(READ_FROM_SOFT.out.versions)
+            .mix(GEOQUERY_GETGEO.out.versions)
     }
     //// Fetch or derive a feature annotation table
 
@@ -203,22 +252,29 @@ workflow DIFFERENTIALABUNDANCE {
     }
     else{
 
-        // Otherwise we can just use the matrix input
-        matrix_as_anno_filename = "matrix_as_anno.${matrix_file.getExtension()}"
-        matrix_file.copyTo(matrix_as_anno_filename)
-        ch_features = Channel.of([ exp_meta, file(matrix_as_anno_filename)])
+        // Otherwise we can just use the matrix input; save it to the workdir so that it does not
+        // just appear wherever the user runs the pipeline
+        matrix_as_anno_filename = "${workflow.workDir}/matrix_as_anno.${matrix_file.getExtension()}"
+        if (params.study_type == 'maxquant'){
+            ch_features_matrix = ch_in_norm
+        } else {
+            ch_features_matrix = ch_in_raw
+        }
+        ch_features = ch_features_matrix
+            .map{ meta, matrix ->
+                matrix.copyTo(matrix_as_anno_filename)
+                [ meta, file(matrix_as_anno_filename) ]
+            }
     }
 
-    // Channel for the contrasts file
-
-    ch_contrasts_file = Channel.from([[exp_meta, file(params.contrasts)]])
-
     // Check compatibility of FOM elements and contrasts
-
-    if (params.study_type == 'affy_array'){
+    if (params.study_type == 'affy_array' || params.study_type == 'maxquant'){
         ch_matrices_for_validation = ch_in_raw
             .join(ch_in_norm)
             .map{tuple(it[0], [it[1], it[2]])}
+    }
+    else if (params.study_type == 'geo_soft_file'){
+        ch_matrices_for_validation = ch_in_norm
     }
     else{
         ch_matrices_for_validation = ch_in_raw
@@ -233,12 +289,12 @@ workflow DIFFERENTIALABUNDANCE {
     // For Affy, we've validated multiple input matrices for raw and norm,
     // we'll separate them out again here
 
-    if (params.study_type == 'affy_array'){
+    if (params.study_type == 'affy_array' || params.study_type == 'maxquant'){
         ch_validated_assays = VALIDATOR.out.assays
             .transpose()
             .branch {
                 raw: it[1].name.contains('raw')
-                normalised: it[1].name.contains('normalised')
+                normalised: it[1].name =~ /normali[sz]ed/
             }
         ch_raw = ch_validated_assays.raw
         ch_norm = ch_validated_assays.normalised
@@ -284,13 +340,14 @@ workflow DIFFERENTIALABUNDANCE {
         .join(ch_features)                          // -> meta, samplesheet, filtered matrix, annotation
         .first()
 
-    if (params.study_type == 'affy_array' || params.study_type == 'geo_soft_file'){
+    if (params.study_type == 'affy_array' || params.study_type == 'geo_soft_file' || params.study_type == 'maxquant'){
 
         LIMMA_DIFFERENTIAL (
             ch_contrasts,
             ch_samples_and_matrix
         )
         ch_differential = LIMMA_DIFFERENTIAL.out.results
+        ch_model = LIMMA_DIFFERENTIAL.out.model
 
         ch_versions = ch_versions
             .mix(LIMMA_DIFFERENTIAL.out.versions)
@@ -301,13 +358,21 @@ workflow DIFFERENTIALABUNDANCE {
     }
     else{
 
+        DESEQ2_NORM (
+            ch_contrasts.first(),
+            ch_samples_and_matrix,
+            ch_control_features,
+            ch_transcript_lengths
+        )
+
         // Run the DESeq differential module, which doesn't take the feature
         // annotations
 
         DESEQ2_DIFFERENTIAL (
             ch_contrasts,
             ch_samples_and_matrix,
-            ch_control_features
+            ch_control_features,
+            ch_transcript_lengths
         )
 
         // Let's make the simplifying assumption that the processed matrices from
@@ -317,17 +382,33 @@ workflow DIFFERENTIALABUNDANCE {
         // blocking factors included differ. But the normalised and
         // variance-stabilised matrices are not (IIUC) impacted by the model.
 
-        ch_norm = DESEQ2_DIFFERENTIAL.out.normalised_counts.first()
-        ch_vst = DESEQ2_DIFFERENTIAL.out.vst_counts.first()
+        ch_norm = DESEQ2_NORM.out.normalised_counts
         ch_differential = DESEQ2_DIFFERENTIAL.out.results
+        ch_model = DESEQ2_DIFFERENTIAL.out.model
 
         ch_versions = ch_versions
             .mix(DESEQ2_DIFFERENTIAL.out.versions)
 
         ch_processed_matrices = ch_norm
-            .join(ch_vst)
+        if ('rlog' in params.deseq2_vs_method){
+            ch_processed_matrices = ch_processed_matrices.join(DESEQ2_NORM.out.rlog_counts)
+        }
+        if ('vst' in params.deseq2_vs_method){
+            ch_processed_matrices = ch_processed_matrices.join(DESEQ2_NORM.out.vst_counts)
+        }
+        ch_processed_matrices = ch_processed_matrices
             .map{ it.tail() }
     }
+
+    // We'll use a local module to filter the differential tables and create output files that contain only differential features
+    ch_logfc = Channel.value([ params.differential_fc_column, params.differential_min_fold_change ])
+    ch_padj = Channel.value([ params.differential_qval_column, params.differential_max_qval ])
+
+    FILTER_DIFFTABLE(
+        ch_differential,
+        ch_logfc,
+        ch_padj
+    )
 
     // Run a gene set analysis where directed
 
@@ -387,6 +468,29 @@ workflow DIFFERENTIALABUNDANCE {
             .mix(GSEA_GSEA.out.versions)
     }
 
+    if (params.gprofiler2_run) {
+
+        // For gprofiler2, use only features that are considered differential
+        ch_filtered_diff = FILTER_DIFFTABLE.out.filtered
+
+        if (!params.gprofiler2_background_file) {
+            // If deactivated, use empty list as "background"
+            ch_background = []
+        } else if (params.gprofiler2_background_file == "auto") {
+            // If auto, use input matrix as background
+            ch_background = CUSTOM_MATRIXFILTER.out.filtered.map{it.tail()}.first()
+        } else {
+            ch_background = Channel.from(file(params.gprofiler2_background_file, checkIfExists: true))
+        }
+
+        // For gprofiler2, token and organism have priority and will override a gene_sets file
+
+        GPROFILER2_GOST(
+            ch_filtered_diff,
+            ch_gene_sets.first(),
+            ch_background
+        )
+    }
 
     // The exploratory plots are made by coloring by every unique variable used
     // to define contrasts
@@ -397,13 +501,16 @@ workflow DIFFERENTIALABUNDANCE {
         }
         .unique()
 
-    if(params.study_type != "geo_soft_file") {
-       ch_mat = ch_raw.combine(ch_processed_matrices)
+    // For geoquery we've done no matrix processing and been supplied with the
+    // normalised matrix, which can be passed through to downstream analysis
+
+    if(params.study_type == "geo_soft_file") {
+        ch_mat = ch_norm
     }else{
-       ch_mat = ch_norm
+        ch_mat = ch_raw.combine(ch_processed_matrices)
     }
 
-     ch_all_matrices = VALIDATOR.out.sample_meta                 // meta, samples
+    ch_all_matrices = VALIDATOR.out.sample_meta                // meta, samples
         .join(VALIDATOR.out.feature_meta)                       // meta, samples, features
         .join(ch_mat)                                           // meta, samples, features, raw, norm (or just norm)
         .map{
@@ -430,9 +537,12 @@ workflow DIFFERENTIALABUNDANCE {
         .mix(PLOT_EXPLORATORY.out.versions)
         .mix(PLOT_DIFFERENTIAL.out.versions)
 
-    CUSTOM_DUMPSOFTWAREVERSIONS (
-        ch_versions.unique().collectFile(name: 'collated_versions.yml')
-    )
+    //
+    // Collate and save software versions
+    //
+
+    ch_collated_versions = softwareVersionsToYAML(ch_versions)
+        .collectFile(storeDir: "${params.outdir}/pipeline_info", name: 'collated_versions.yml', sort: true, newLine: true)
 
     // Generate a list of files that will be used by the markdown report
 
@@ -446,18 +556,27 @@ workflow DIFFERENTIALABUNDANCE {
     ch_report_input_files = ch_all_matrices
         .map{ it.tail() }
         .map{it.flatten()}
-        .combine(ch_contrasts_file.map{it.tail()})
-        .combine(CUSTOM_DUMPSOFTWAREVERSIONS.out.yml)
+        .combine(VALIDATOR.out.contrasts.map{it.tail()})
+        .combine(ch_collated_versions)
         .combine(ch_logo_file)
         .combine(ch_css_file)
         .combine(ch_citations_file)
         .combine(ch_differential.map{it[1]}.toList())
+        .combine(ch_model.map{it[1]}.toList())
 
     if (params.gsea_run){
         ch_report_input_files = ch_report_input_files
             .combine(ch_gsea_results
                 .map{it.tail()}.flatMap().toList()
             )
+    }
+
+    if (params.gprofiler2_run){
+        ch_report_input_files = ch_report_input_files
+            .combine(GPROFILER2_GOST.out.plot_html.map{it[1]}.flatMap().toList())
+            .combine(GPROFILER2_GOST.out.all_enrich.map{it[1]}.flatMap().toList())
+            .combine(GPROFILER2_GOST.out.sub_enrich.map{it[1]}.flatMap().toList())
+        GPROFILER2_GOST.out.plot_html
     }
 
     if (params.shinyngs_build_app){
@@ -494,10 +613,23 @@ workflow DIFFERENTIALABUNDANCE {
 
     // Condition params reported on study type
 
-    def params_pattern = ~/^(report|study|observations|features|filtering|exploratory|differential|deseq2|gsea).*/
-    if (params.study_type == 'affy_array' || 'geo_soft_file'){
-        params_pattern = ~/^(report|study|observations|features|filtering|exploratory|differential|affy|limma|gsea).*/
+    def params_pattern = "report|gene_sets|study|observations|features|filtering|exploratory|differential"
+    if (params.study_type == 'rnaseq'){
+        params_pattern += "|deseq2"
     }
+    if (params.study_type == 'affy_array' || params.study_type == 'geo_soft_file'){
+        params_pattern += "|affy|limma"
+    }
+    if (params.study_type == 'maxquant'){
+        params_pattern += "|proteus|limma"
+    }
+    if (params.gprofiler2_run){
+        params_pattern += "|gprofiler2"
+    }
+    if (params.gsea_run){
+        params_pattern += "|gsea"
+    }
+    params_pattern = ~/(${params_pattern}).*/
 
     ch_report_params = ch_report_input_files
         .map{
@@ -506,29 +638,21 @@ workflow DIFFERENTIALABUNDANCE {
         }
 
     // Render the final report
-
     RMARKDOWNNOTEBOOK(
         ch_report_file,
         ch_report_params,
         ch_report_input_files
     )
 
-}
+    // Make a report bundle comprising the markdown document and all necessary
+    // input files
 
-/*
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    COMPLETION EMAIL AND SUMMARY
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-*/
+    MAKE_REPORT_BUNDLE(
+        RMARKDOWNNOTEBOOK.out.parameterised_notebook
+            .combine(ch_report_input_files)
+            .map{[it[0], it[1..-1]]}
+    )
 
-workflow.onComplete {
-    if (params.email || params.email_on_fail) {
-        NfcoreTemplate.email(workflow, params, summary_params, projectDir, log, multiqc_report)
-    }
-    NfcoreTemplate.summary(workflow, params, log)
-    if (params.hook_url) {
-        NfcoreTemplate.IM_notification(workflow, params, summary_params, projectDir, log)
-    }
 }
 
 /*
