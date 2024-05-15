@@ -7,7 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### `Added`
 
+- [[#266](https://github.com/nf-core/differentialabundance/pull/266)] - Fix logging by specifying assays to log ([@pinin4fjords](https://github.com/pinin4fjords), review by [@WackerO](https://github.com/WackerO))
 - [[#259](https://github.com/nf-core/differentialabundance/pull/259)] - Bump gtf2featureannotation to fix GTF handling error ([@pinin4fjords](https://github.com/pinin4fjords), review by [@WackerO](https://github.com/WackerO))
+- [[#257](https://github.com/nf-core/differentialabundance/pull/257)] - Added maxquant profile to nextflow.config to make it available ([@WackerO](https://github.com/WackerO), review by [@pinin4fjords](https://github.com/pinin4fjords))
 - [[#254](https://github.com/nf-core/differentialabundance/pull/254)] - Some parameter changes, added qbic credits ([@WackerO](https://github.com/WackerO), review by [@pinin4fjords](https://github.com/pinin4fjords))
 - [[#250](https://github.com/nf-core/differentialabundance/pull/250)] - Template update for nf-core/tools v2.13.1 ([@WackerO](https://github.com/WackerO), review by [@pinin4fjords](https://github.com/pinin4fjords))
 - [[#244](https://github.com/nf-core/differentialabundance/pull/244)] - Add pipeline params for matrixfilter NA options ([@WackerO](https://github.com/WackerO), review by [@pinin4fjords](https://github.com/pinin4fjords))
@@ -19,6 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### `Fixed`
 
+- [[#267](https://github.com/nf-core/differentialabundance/pull/267)] - Whitespace fix, remove TODO, also update changelog for release release 1.5.0 ([@WackerO](https://github.com/WackerO), review by [@pinin4fjords](https://github.com/pinin4fjords))
+- [[#265](https://github.com/nf-core/differentialabundance/pull/265)] - GSEA- pngs and htmls in same place ([@pinin4fjords](https://github.com/pinin4fjords), review by [@WackerO](https://github.com/WackerO))
+- [[#257](https://github.com/nf-core/differentialabundance/pull/257)] - Fixed FILTER_DIFFTABLE module, updated PROTEUS module to better handle whitespace in prefix param, made docs clearer ([@WackerO](https://github.com/WackerO), review by [@pinin4fjords](https://github.com/pinin4fjords))
 - [[#254](https://github.com/nf-core/differentialabundance/pull/254)] - Made differential_file_suffix optional ([@WackerO](https://github.com/WackerO), review by [@pinin4fjords](https://github.com/pinin4fjords))
 - [[#240](https://github.com/nf-core/differentialabundance/pull/240)] - Publish GSEA reports ([@pinin4fjords](https://github.com/pinin4fjords), review by [@WackerO](https://github.com/WackerO))
 - [[#231](https://github.com/nf-core/differentialabundance/pull/231)] - Update GSEA module to fix butterfly plot bug ([@WackerO](https://github.com/WackerO), review by [@pinin4fjords](https://github.com/pinin4fjords))
@@ -31,6 +36,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### `Changed`
 
+- [[#256](https://github.com/nf-core/differentialabundance/pull/256)] - Release 1.5.0 ([@WackerO](https://github.com/WackerO), review by [@maxulysse](https://github.com/maxulysse), [@pinin4fjords](https://github.com/pinin4fjords))
+- [[#264](https://github.com/nf-core/differentialabundance/pull/264)] - Change FILTER_DIFFTABLE to python because AWK does not correctly filter reliably ([@WackerO](https://github.com/WackerO), review by [@pinin4fjords](https://github.com/pinin4fjords))
 - [[#232](https://github.com/nf-core/differentialabundance/pull/232)] - Mention missing dots in volcano plot, change rounding, turn off rounding by default ([@WackerO](https://github.com/WackerO), review by [@pinin4fjords](https://github.com/pinin4fjords))
 
 ## v1.4.0 - 2023-11-27
